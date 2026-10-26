@@ -79,6 +79,17 @@ func (w *watcher) addTree(dir string) error {
 	})
 }
 
+// unwatchTree drops the watches at and below p. A renamed directory keeps its
+// inotify watch under the old name, and registering the new name races
+// fsnotify's own cleanup of the old one, which can then drop the new watch.
+func (w *watcher) unwatchTree(p string) {
+	for _, watched := range w.fsw.WatchList() {
+		if watched == p || strings.HasPrefix(watched, p+string(filepath.Separator)) {
+			_ = w.fsw.Remove(watched)
+		}
+	}
+}
+
 // rel returns p relative to the root as a slash path ("." for the root itself).
 func (w *watcher) rel(p string) (string, bool) {
 	r, err := filepath.Rel(w.root, p)
@@ -112,6 +123,9 @@ func (w *watcher) handle(e fsnotify.Event) {
 	}
 	target := "/" + rel
 
+	if e.Has(fsnotify.Remove) || e.Has(fsnotify.Rename) {
+		w.unwatchTree(e.Name)
+	}
 	if e.Has(fsnotify.Create) {
 		if info, err := os.Stat(e.Name); err == nil && info.IsDir() {
 			if err := w.addTree(e.Name); err != nil {

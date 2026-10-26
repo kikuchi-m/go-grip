@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -177,6 +178,40 @@ func TestWatcherSurvivesRemovedDirectory(t *testing.T) {
 	writeFile(t, filepath.Join(root, "a.md"), "new")
 
 	waitNotified(t, sub)
+}
+
+// Renaming a watched directory races the re-registration of the new name
+// against fsnotify's own handling of the old watch, so one directory is not
+// enough to see it fail reliably.
+func TestWatcherWatchesRenamedDirectories(t *testing.T) {
+	t.Parallel()
+
+	const n = 20
+	root := t.TempDir()
+	for i := range n {
+		mkdir(t, filepath.Join(root, fmt.Sprintf("d%d", i)))
+		writeFile(t, filepath.Join(root, fmt.Sprintf("d%d", i), "a.md"), "old")
+	}
+	hub := startTestWatcher(t, root)
+	rootSub := hub.subscribe("/")
+	subs := make([]*reloadSub, n)
+	for i := range n {
+		subs[i] = hub.subscribe(fmt.Sprintf("/e%d/a.md", i))
+	}
+
+	for i := range n {
+		if err := os.Rename(filepath.Join(root, fmt.Sprintf("d%d", i)), filepath.Join(root, fmt.Sprintf("e%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitNotified(t, rootSub)
+	for i := range n {
+		writeFile(t, filepath.Join(root, fmt.Sprintf("e%d", i), "a.md"), "new")
+	}
+
+	for i := range n {
+		waitNotified(t, subs[i])
+	}
 }
 
 func TestWatcherDebouncesBursts(t *testing.T) {
