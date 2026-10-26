@@ -123,7 +123,7 @@ To disable automatic browser reload on file changes (useful for stable editing):
 go-grip --no-reload README.md
 ```
 
-To hide files and directories from the file-tree, use `--exclude` (repeatable). Each pattern is matched against a single file or directory name with Go's `path.Match`, so it cannot contain `/`:
+To hide files and directories from the file-tree, use `--exclude` or `-x` (repeatable). Each pattern is matched against a single file or directory name with Go's `path.Match`, so it cannot contain `/`:
 
 ```bash
 go-grip --exclude .git --exclude '*.swp'

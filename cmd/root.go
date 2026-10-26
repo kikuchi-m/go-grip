@@ -55,5 +55,5 @@ func init() {
 	rootCmd.Flags().IntP("port", "p", 6419, "Port to use")
 	rootCmd.Flags().Bool("bounding-box", true, "Add bounding box to HTML")
 	rootCmd.Flags().Bool("no-reload", false, "Disable automatic browser reload on file changes")
-	rootCmd.Flags().StringArray("exclude", nil, "Hide files and directories whose name matches the glob pattern from the listing, direct access and reload watching (repeatable)")
+	rootCmd.Flags().StringArrayP("exclude", "x", nil, "Hide files and directories whose name matches the glob pattern from the listing, direct access and reload watching (repeatable)")
 }
