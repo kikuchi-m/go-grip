@@ -115,6 +115,8 @@ If a `README.md` exists in that directory it is opened directly, otherwise the f
 
 Dark mode is not a launch option: use the toggle in the top right corner of the page. Your choice is stored in the browser's local storage, so each browser remembers its own theme. Without a stored choice the page follows the operating system's `prefers-color-scheme` setting.
 
+A page reloads automatically only when the file it shows changes: the Markdown file itself, or, for a file-tree page, a file or directory created, removed or renamed directly in that directory.
+
 To disable automatic browser reload on file changes (useful for stable editing):
 
 ```bash

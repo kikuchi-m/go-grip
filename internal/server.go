@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"html"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -15,7 +14,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/aarol/reload"
 	chroma_html "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/chrishrb/go-grip/defaults"
@@ -50,18 +48,13 @@ func (s *Server) Serve(file string) error {
 	directory := path.Dir(file)
 	filename := path.Base(file)
 
-	var reloadMiddleware *reload.Reloader
-	if s.opts.Reload {
-		reloadMiddleware = reload.New(directory)
-		reloadMiddleware.DebugLog = log.New(io.Discard, "", 0)
-		// Fix WebSocket CORS issues for development
-		reloadMiddleware.Upgrader.CheckOrigin = func(r *http.Request) bool {
-			return true
-		}
+	handler, closeFn, err := s.buildHandler(directory)
+	if err != nil {
+		return err
 	}
+	defer closeFn()
 
 	fsys := s.fileSystem(directory)
-	handler := s.newHandler(fsys)
 
 	addr := fmt.Sprintf("http://%s:%d/", s.opts.Host, s.opts.Port)
 	if file == "" {
@@ -89,12 +82,38 @@ func (s *Server) Serve(file string) error {
 	}
 
 	if s.opts.Reload {
-		handler = reloadMiddleware.Handle(handler)
 		fmt.Printf("📡 Auto-reload enabled. Files will trigger browser refresh.\n")
 	} else {
 		fmt.Printf("🔄 Auto-reload disabled. Use F5 to manually refresh.\n")
 	}
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.opts.Port), handler)
+}
+
+// buildHandler returns the handler serving directory and a function releasing
+// what it holds (the file watcher). With reload enabled, a watcher notifies
+// the pages whose files changed and every HTML response carries the script
+// that listens for it.
+func (s *Server) buildHandler(directory string) (http.Handler, func(), error) {
+	handler := s.newHandler(s.fileSystem(directory))
+	if !s.opts.Reload {
+		return handler, func() {}, nil
+	}
+
+	hub := newReloadHub()
+	wt, err := newWatcher(directory, s.excluder, hub)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(reloadEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		serveReloadWS(hub, w, r)
+	})
+	mux.Handle("/", injectReloadScript(handler))
+	return mux, func() {
+		//nolint:errcheck
+		wt.Close()
+	}, nil
 }
 
 func (s *Server) newHandler(dir http.FileSystem) http.Handler {
