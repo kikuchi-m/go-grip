@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,8 +20,16 @@ type Excluder struct {
 // name (never a path), so patterns containing "/" are rejected.
 func NewExcluder(patterns []string) (*Excluder, error) {
 	for _, p := range patterns {
+		// MatchPath cleans the path first, so no segment is ever empty, "." or "..".
+		if p == "" || p == "." || p == ".." {
+			return nil, fmt.Errorf("invalid exclude pattern %q: it can never match a file or directory name", p)
+		}
 		if strings.Contains(p, "/") {
-			return nil, fmt.Errorf("invalid exclude pattern %q: use the file or directory name without '/'", p)
+			msg := fmt.Sprintf("invalid exclude pattern %q: patterns match one file or directory name, so '/' is not allowed", p)
+			if name := strings.Trim(p, "/"); name != "" && !strings.Contains(name, "/") {
+				msg += fmt.Sprintf("; did you mean %q?", name)
+			}
+			return nil, errors.New(msg)
 		}
 		// path.Match validates the whole pattern even when the name does not match.
 		if _, err := path.Match(p, ""); err != nil {

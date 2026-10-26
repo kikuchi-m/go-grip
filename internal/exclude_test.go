@@ -8,20 +8,51 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
 func TestNewExcluderRejectsInvalidPatterns(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range []string{"[", "a/b", "node_modules/", "/x"} {
+	for _, p := range []string{"[", "a/b", "node_modules/", "/x", "", ".", ".."} {
 		if _, err := NewExcluder([]string{p}); err == nil {
 			t.Errorf("expected error for pattern %q", p)
 		}
 	}
-	for _, patterns := range [][]string{{".git"}, {"*.swp"}, {}, nil} {
+	for _, patterns := range [][]string{{".git"}, {"*.swp"}, {".*"}, {}, nil} {
 		if _, err := NewExcluder(patterns); err != nil {
 			t.Errorf("unexpected error for %v: %v", patterns, err)
+		}
+	}
+}
+
+func TestNewExcluderErrorSuggestsNameWithoutSlash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		pattern     string
+		wantSuggest string
+	}{
+		{"node_modules/", `did you mean "node_modules"?`},
+		{"/x", `did you mean "x"?`},
+		{"a/b", ""},
+		{"/", ""},
+	}
+	for _, tt := range tests {
+		_, err := NewExcluder([]string{tt.pattern})
+		if err == nil {
+			t.Errorf("expected error for pattern %q", tt.pattern)
+			continue
+		}
+		if tt.wantSuggest == "" {
+			if strings.Contains(err.Error(), "did you mean") {
+				t.Errorf("pattern %q: unexpected suggestion in %q", tt.pattern, err)
+			}
+			continue
+		}
+		if !strings.Contains(err.Error(), tt.wantSuggest) {
+			t.Errorf("pattern %q: error %q does not contain %q", tt.pattern, err, tt.wantSuggest)
 		}
 	}
 }

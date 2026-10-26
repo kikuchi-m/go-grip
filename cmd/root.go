@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 		port, _ := cmd.Flags().GetInt("port")
 		boundingBox, _ := cmd.Flags().GetBool("bounding-box")
 		noReload, _ := cmd.Flags().GetBool("no-reload")
-		exclude, _ := cmd.Flags().GetStringArray("exclude")
+		exclude := excludePatterns(cmd)
 
 		var file string
 		if len(args) == 1 {
@@ -39,6 +39,16 @@ var rootCmd = &cobra.Command{
 		}
 		return server.Serve(file)
 	},
+}
+
+// excludePatterns returns the --exclude values as given. GetStringArray cannot
+// be used: it passes the value through a string and turns a lone "" into no
+// value at all, so an empty pattern would never reach the validation.
+func excludePatterns(cmd *cobra.Command) []string {
+	if v, ok := cmd.Flags().Lookup("exclude").Value.(interface{ GetSlice() []string }); ok {
+		return v.GetSlice()
+	}
+	return nil
 }
 
 func Execute() {
