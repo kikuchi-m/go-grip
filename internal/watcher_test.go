@@ -214,6 +214,26 @@ func TestWatcherWatchesRenamedDirectories(t *testing.T) {
 	}
 }
 
+func TestWatcherForgetsDirectoryMovedOutOfTree(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	mkdir(t, filepath.Join(root, "docs", "sub"))
+	writeFile(t, filepath.Join(root, "docs", "sub", "x.md"), "old")
+	hub := startTestWatcher(t, root)
+	rootSub := hub.subscribe("/")
+	stale := hub.subscribe("/docs/sub/x.md")
+
+	if err := os.Rename(filepath.Join(root, "docs"), filepath.Join(outside, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	waitNotified(t, rootSub)
+	writeFile(t, filepath.Join(outside, "docs", "sub", "x.md"), "new")
+
+	assertSilent(t, stale)
+}
+
 func TestWatcherDebouncesBursts(t *testing.T) {
 	t.Parallel()
 
