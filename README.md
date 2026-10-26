@@ -121,6 +121,14 @@ To disable automatic browser reload on file changes (useful for stable editing):
 go-grip --no-reload README.md
 ```
 
+To hide files and directories from the file-tree, use `--exclude` (repeatable). Each pattern is matched against a single file or directory name with Go's `path.Match`, so it cannot contain `/`:
+
+```bash
+go-grip --exclude .git --exclude '*.swp'
+```
+
+Excluded names also return 404 when requested directly, and they are not watched for automatic reload.
+
 The browser page title is derived from the Markdown filename (`my-guide_v2.md` becomes `My Guide V2`).
 
 To check which build you are running:

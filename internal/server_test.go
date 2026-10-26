@@ -18,7 +18,7 @@ func TestDirectoryListingIgnoresCacheValidators(t *testing.T) {
 		t.Fatalf("write README.md: %v", err)
 	}
 
-	server := NewServer("localhost", 6419, false, false, false, NewParser())
+	server := mustNewServer(t, Options{Host: "localhost", Port: 6419})
 	handler := server.newHandler(http.Dir(tmpDir))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -46,7 +46,7 @@ func TestRegularFileStillSupportsConditionalRequests(t *testing.T) {
 		t.Fatalf("write plain.txt: %v", err)
 	}
 
-	server := NewServer("localhost", 6419, false, false, false, NewParser())
+	server := mustNewServer(t, Options{Host: "localhost", Port: 6419})
 	handler := server.newHandler(http.Dir(tmpDir))
 
 	req := httptest.NewRequest(http.MethodGet, "/plain.txt", nil)
@@ -68,7 +68,7 @@ func TestMarkdownResponsesDisableCaching(t *testing.T) {
 		t.Fatalf("write README.md: %v", err)
 	}
 
-	server := NewServer("localhost", 6419, false, false, false, NewParser())
+	server := mustNewServer(t, Options{Host: "localhost", Port: 6419})
 	handler := server.newHandler(http.Dir(tmpDir))
 
 	req := httptest.NewRequest(http.MethodGet, "/README.md", nil)
@@ -132,7 +132,7 @@ func TestFilenameTitleResponses(t *testing.T) {
 		}
 	}
 
-	server := NewServer("localhost", 6419, false, false, false, NewParser())
+	server := mustNewServer(t, Options{Host: "localhost", Port: 6419})
 	handler := server.newHandler(http.Dir(tmpDir))
 
 	tests := []struct {
@@ -158,5 +158,119 @@ func TestFilenameTitleResponses(t *testing.T) {
 				t.Fatalf("expected response to contain %q, got %q", tt.want, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func mustNewServer(t *testing.T, opts Options) *Server {
+	t.Helper()
+
+	server, err := NewServer(opts, NewParser())
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return server
+}
+
+func newExcludeServerDir(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	files := map[string]string{
+		"a.md":      "# Visible\n",
+		"secret.md": "# Secret\n",
+		"x.swp":     "swap",
+		".git/HEAD": "ref: secret-head",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+func serveExcluded(t *testing.T, exclude []string, path string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	dir := newExcludeServerDir(t)
+	server := mustNewServer(t, Options{Host: "localhost", Port: 6419, Exclude: exclude})
+	handler := server.newHandler(server.fileSystem(dir))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	return recorder
+}
+
+func TestExcludedPathsAreHiddenFromListing(t *testing.T) {
+	t.Parallel()
+
+	recorder := serveExcluded(t, []string{".git", "*.swp"}, "/")
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "a.md") {
+		t.Errorf("expected listing to contain a.md, got %q", body)
+	}
+	for _, hidden := range []string{".git", "x.swp"} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("expected listing to hide %q, got %q", hidden, body)
+		}
+	}
+}
+
+func TestExcludedPathsReturnNotFound(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"/.git/HEAD", http.StatusNotFound},
+		{"/x.swp", http.StatusNotFound},
+		{"/a.md", http.StatusOK},
+	}
+	for _, tt := range tests {
+		recorder := serveExcluded(t, []string{".git", "*.swp"}, tt.path)
+		if recorder.Code != tt.want {
+			t.Errorf("GET %s = %d, want %d", tt.path, recorder.Code, tt.want)
+		}
+	}
+}
+
+func TestExcludedMarkdownIsNotRendered(t *testing.T) {
+	t.Parallel()
+
+	recorder := serveExcluded(t, []string{"secret.md"}, "/secret.md")
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "Secret") {
+		t.Fatalf("excluded markdown must not be rendered, got %q", recorder.Body.String())
+	}
+}
+
+func TestExcludeIsNotBypassedByEncodedOrDotDotPaths(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"/%2Egit/HEAD", "/sub/../.git/HEAD", "/%2e%2e/.git/HEAD"} {
+		recorder := serveExcluded(t, []string{".git"}, path)
+
+		if recorder.Code == http.StatusOK {
+			t.Errorf("GET %s = 200, want the excluded file not to be served", path)
+		}
+		if strings.Contains(recorder.Body.String(), "secret-head") {
+			t.Errorf("GET %s leaked excluded content: %q", path, recorder.Body.String())
+		}
+	}
+}
+
+func TestNewServerRejectsInvalidExclude(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewServer(Options{Exclude: []string{"a/b"}}, NewParser()); err == nil {
+		t.Fatal("expected an error for an exclude pattern containing '/'")
 	}
 }

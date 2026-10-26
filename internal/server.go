@@ -24,23 +24,26 @@ import (
 const defaultHTMLTitle = "go-grip - markdown preview"
 
 type Server struct {
-	parser       *Parser
-	boundingBox  bool
-	host         string
-	port         int
-	browser      bool
-	enableReload bool
+	parser   *Parser
+	opts     Options
+	excluder *Excluder
 }
 
-func NewServer(host string, port int, boundingBox bool, browser bool, enableReload bool, parser *Parser) *Server {
-	return &Server{
-		host:         host,
-		port:         port,
-		boundingBox:  boundingBox,
-		browser:      browser,
-		enableReload: enableReload,
-		parser:       parser,
+func NewServer(opts Options, parser *Parser) (*Server, error) {
+	excluder, err := NewExcluder(opts.Exclude)
+	if err != nil {
+		return nil, err
 	}
+	return &Server{
+		parser:   parser,
+		opts:     opts,
+		excluder: excluder,
+	}, nil
+}
+
+// fileSystem serves root without the entries matching the exclude patterns.
+func (s *Server) fileSystem(root string) http.FileSystem {
+	return newExcludeFS(http.Dir(root), s.excluder)
 }
 
 func (s *Server) Serve(file string) error {
@@ -48,7 +51,7 @@ func (s *Server) Serve(file string) error {
 	filename := path.Base(file)
 
 	var reloadMiddleware *reload.Reloader
-	if s.enableReload {
+	if s.opts.Reload {
 		reloadMiddleware = reload.New(directory)
 		reloadMiddleware.DebugLog = log.New(io.Discard, "", 0)
 		// Fix WebSocket CORS issues for development
@@ -57,14 +60,14 @@ func (s *Server) Serve(file string) error {
 		}
 	}
 
-	dir := http.Dir(directory)
-	handler := s.newHandler(dir)
+	fsys := s.fileSystem(directory)
+	handler := s.newHandler(fsys)
 
-	addr := fmt.Sprintf("http://%s:%d/", s.host, s.port)
+	addr := fmt.Sprintf("http://%s:%d/", s.opts.Host, s.opts.Port)
 	if file == "" {
 		// If README.md exists then open README.md at beginning
 		readme := "README.md"
-		f, err := dir.Open(readme)
+		f, err := fsys.Open(readme)
 		if err == nil {
 			//nolint:errcheck
 			defer f.Close()
@@ -78,23 +81,23 @@ func (s *Server) Serve(file string) error {
 
 	fmt.Printf("🚀 Starting server: %s\n", addr)
 
-	if s.browser {
+	if s.opts.Browser {
 		err := Open(addr)
 		if err != nil {
 			fmt.Println("❌ Error opening browser:", err)
 		}
 	}
 
-	if s.enableReload {
+	if s.opts.Reload {
 		handler = reloadMiddleware.Handle(handler)
 		fmt.Printf("📡 Auto-reload enabled. Files will trigger browser refresh.\n")
 	} else {
 		fmt.Printf("🔄 Auto-reload disabled. Use F5 to manually refresh.\n")
 	}
-	return http.ListenAndServe(fmt.Sprintf(":%d", s.port), handler)
+	return http.ListenAndServe(fmt.Sprintf(":%d", s.opts.Port), handler)
 }
 
-func (s *Server) newHandler(dir http.Dir) http.Handler {
+func (s *Server) newHandler(dir http.FileSystem) http.Handler {
 	fileServer := http.FileServer(dir)
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.FileServer(http.FS(defaults.StaticFiles)))
@@ -119,7 +122,7 @@ func (s *Server) newHandler(dir http.Dir) http.Handler {
 
 				err = serveTemplate(w, htmlStruct{
 					Content:      string(htmlContent),
-					BoundingBox:  s.boundingBox,
+					BoundingBox:  s.opts.BoundingBox,
 					CssCodeLight: getCssCode("github"),
 					CssCodeDark:  getCssCode("github-dark"),
 					Title:        html.EscapeString(s.pageTitle(r.URL.Path)),
@@ -144,7 +147,7 @@ func (s *Server) newHandler(dir http.Dir) http.Handler {
 	return mux
 }
 
-func readToString(dir http.Dir, filename string) ([]byte, error) {
+func readToString(dir http.FileSystem, filename string) ([]byte, error) {
 	f, err := dir.Open(filename)
 	if err != nil {
 		return nil, err
@@ -227,7 +230,7 @@ func stripCacheValidators(r *http.Request) {
 	r.Header.Del("If-None-Match")
 }
 
-func isDirectory(dir http.Dir, name string) (bool, error) {
+func isDirectory(dir http.FileSystem, name string) (bool, error) {
 	file, err := dir.Open(name)
 	if err != nil {
 		return false, err
@@ -243,7 +246,7 @@ func isDirectory(dir http.Dir, name string) (bool, error) {
 	return info.IsDir(), nil
 }
 
-func isRegularFile(dir http.Dir, name string) (bool, error) {
+func isRegularFile(dir http.FileSystem, name string) (bool, error) {
 	file, err := dir.Open(name)
 	if err != nil {
 		return false, err
