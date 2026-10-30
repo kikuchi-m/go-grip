@@ -44,10 +44,29 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
+		var opts []internal.ServerOption
+		if patterns := excludePatterns(cmd); len(patterns) > 0 {
+			excluder, err := internal.NewExcluder(patterns)
+			if err != nil {
+				return err
+			}
+			opts = append(opts, internal.WithExcluder(excluder))
+		}
+
 		parser := internal.NewParser(disabledFeatures)
-		server := internal.NewServer(host, port, boundingBox, browser, !noReload, parser, logger)
+		server := internal.NewServer(host, port, boundingBox, browser, !noReload, parser, logger, opts...)
 		return server.Serve(file)
 	},
+}
+
+// excludePatterns returns the --exclude values as given. GetStringArray cannot
+// be used: it passes the value through a string and turns a lone "" into no
+// value at all, so an empty pattern would never reach the validation.
+func excludePatterns(cmd *cobra.Command) []string {
+	if v, ok := cmd.Flags().Lookup("exclude").Value.(interface{ GetSlice() []string }); ok {
+		return v.GetSlice()
+	}
+	return nil
 }
 
 // logLevel returns the validated --log-level value.
@@ -89,4 +108,6 @@ func init() {
 	)
 	rootCmd.Flags().Bool("no-reload", false, "Disable automatic browser reload on file changes")
 	rootCmd.Flags().String("log-level", "info", "Log level on stderr: error, warn, info or debug")
+	rootCmd.Flags().StringArrayP("exclude", "x", nil,
+		"Hide files and directories whose name matches the glob pattern from listings, direct access and live reload (repeatable)")
 }

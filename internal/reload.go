@@ -62,6 +62,9 @@ type Hub struct {
 	refs    map[string]int
 	failed  map[string]bool
 
+	// exclude, when set, makes the hub ignore events on matching names.
+	exclude *Excluder
+
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
 }
@@ -216,6 +219,12 @@ func (h *Hub) handle(ev fsnotify.Event) {
 		return
 	}
 	name := filepath.Clean(ev.Name)
+	if h.exclude.Match(filepath.Base(name)) {
+		if debug {
+			h.log.Debug("fs event ignored", "op", ev.Op.String(), "path", name, "reason", "excluded")
+		}
+		return
+	}
 	parent := filepath.Dir(name)
 	temp := isTempName(filepath.Base(name))
 

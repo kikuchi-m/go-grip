@@ -147,6 +147,15 @@ go-grip --disable-markdown-feature mathjax README.md
 go-grip --disable-markdown-feature mathjax --disable-markdown-feature mermaid README.md
 ```
 
+To hide files and directories, use `--exclude` or `-x` (repeatable). Each pattern is matched against a single file or directory name with Go's `path.Match`, so it cannot contain `/`. A match anywhere in a path hides everything below it.
+
+```bash
+go-grip --exclude .git --exclude '*.swp'
+go-grip -x .git -x '*.java' README.md
+```
+
+Excluded names are left out of folder listings, return 404 when requested directly, and do not trigger a reload. Matching is case-sensitive, and by default nothing is excluded.
+
 go-grip logs to stderr. `--log-level` sets how much it prints: `error`, `warn`, `info` (the default) or `debug`. At `info` you only see the startup lines, warnings and errors; `error` hides the startup lines too. `debug` adds a timestamped line for every request (method, path, status, duration), every file system event and whether it was ignored, each debounced reload and how many events it coalesced, and each live reload connection. Attach that output when reporting a reload problem:
 
 ```bash

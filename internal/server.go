@@ -37,6 +37,16 @@ type Server struct {
 	enableReload bool
 	hub          *Hub
 	log          *slog.Logger
+	excluder     *Excluder
+}
+
+// ServerOption customizes a Server.
+type ServerOption func(*Server)
+
+// WithExcluder hides the names the excluder matches: from folder listings,
+// from direct access (404) and from live reload.
+func WithExcluder(ex *Excluder) ServerOption {
+	return func(s *Server) { s.excluder = ex }
 }
 
 // reloadDebounce collapses the several events an editor writes per save into
@@ -53,8 +63,8 @@ func (s *Server) reloading() bool {
 }
 
 // NewServer returns a server. A nil logger discards all output.
-func NewServer(host string, port int, boundingBox bool, browser bool, enableReload bool, parser *Parser, logger *slog.Logger) *Server {
-	return &Server{
+func NewServer(host string, port int, boundingBox bool, browser bool, enableReload bool, parser *Parser, logger *slog.Logger, opts ...ServerOption) *Server {
+	s := &Server{
 		host:         host,
 		port:         port,
 		boundingBox:  boundingBox,
@@ -63,6 +73,10 @@ func NewServer(host string, port int, boundingBox bool, browser bool, enableRelo
 		parser:       parser,
 		log:          orDiscard(logger),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Server) Serve(file string) error {
@@ -78,6 +92,7 @@ func (s *Server) Serve(file string) error {
 			s.enableReload = false
 		} else {
 			s.hub = NewHub(src, reloadDebounce, s.log)
+			s.hub.exclude = s.excluder
 			go s.hub.Run(context.Background())
 		}
 	}
@@ -202,18 +217,23 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 }
 
 func (s *Server) newHandler(fsys http.FileSystem) http.Handler {
+	// absRoot is taken before the exclude wrapper below, which is not an http.Dir.
+	absRoot := ""
+	if dir, ok := fsys.(http.Dir); ok {
+		if abs, err := filepath.Abs(string(dir)); err == nil {
+			absRoot = abs
+		}
+	}
+	if s.excluder != nil {
+		fsys = newExcludeFS(fsys, s.excluder)
+	}
+
 	root := NewRoot(fsys)
 	fileServer := http.FileServer(fsys)
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.FileServer(http.FS(defaults.StaticFiles)))
 
 	if s.reloading() {
-		absRoot := ""
-		if dir, ok := fsys.(http.Dir); ok {
-			if abs, err := filepath.Abs(string(dir)); err == nil {
-				absRoot = abs
-			}
-		}
 		mux.HandleFunc(eventsPath, func(w http.ResponseWriter, r *http.Request) {
 			s.serveEvents(w, r, root, absRoot)
 		})
