@@ -1,57 +1,74 @@
-// Live reload: go-grip streams a "reload" event when something this page
-// shows has changed (the Markdown file, an image it references, or for a
-// folder page, the folder's entries).
+// Live reload: go-grip sends a "reload" message over a WebSocket when
+// something this page shows has changed (the Markdown file, an image it
+// references, or for a folder page, the folder's entries).
+//
+// A WebSocket is used instead of an event stream because a browser keeps only
+// a few long-lived HTTP connections per host open (six in Chrome), shared by
+// all tabs. One stream per open page uses them up and stalls the next page
+// load; an established WebSocket does not count against that limit.
 (function () {
-  if (!window.EventSource) return;
+  if (!window.WebSocket) return;
 
   var pagePath = location.pathname;
   try {
     pagePath = decodeURIComponent(pagePath);
   } catch (e) {}
-  var url = "/__grip/events?path=" + encodeURIComponent(pagePath);
+  var url =
+    (location.protocol === "https:" ? "wss://" : "ws://") +
+    location.host +
+    "/__grip/ws?path=" +
+    encodeURIComponent(pagePath);
 
-  var source = null;
+  var socket = null;
+  var retryTimer = null;
+  var everOpened = false;
+  var lostConnection = false;
+  var leaving = false;
 
   function connect() {
-    var es = new EventSource(url);
-    var lostConnection = false;
+    var ws = new WebSocket(url);
+    socket = ws;
 
-    es.addEventListener("reload", function () {
-      es.close();
-      location.reload();
-    });
-
-    es.onerror = function () {
-      lostConnection = true;
-    };
-
-    // The connection came back after an error: the server probably
-    // restarted, so the page may be stale.
-    es.onopen = function () {
+    ws.onopen = function () {
+      everOpened = true;
+      // The connection came back after a drop: the server probably
+      // restarted, so the page may be stale.
       if (lostConnection) {
-        es.close();
         location.reload();
       }
     };
 
-    source = es;
+    ws.onmessage = function (event) {
+      if (event.data === "reload") {
+        leaving = true;
+        location.reload();
+      }
+    };
+
+    ws.onclose = function () {
+      if (leaving || socket !== ws) return;
+      // Never connecting means the server refused this page: do not retry.
+      if (!everOpened) return;
+      lostConnection = true;
+      retryTimer = setTimeout(connect, 1000);
+    };
   }
 
   // Leaving the page. Chrome's back/forward cache freezes the page instead of
-  // unloading it, and would keep this stream's connection open. A few frozen
-  // pages use up the browser's per-host connection limit and stall the next
-  // navigation, so release the connection. Closing an EventSource keeps the
-  // page eligible for the cache; an unload handler would not.
+  // unloading it, and would keep the connection open, so release it. An
+  // unload handler would make the page ineligible for the cache.
   window.addEventListener("pagehide", function () {
-    if (source) {
-      source.close();
-      source = null;
+    leaving = true;
+    clearTimeout(retryTimer);
+    if (socket) {
+      socket.close();
+      socket = null;
     }
   });
 
   // Back from the cache. Files may have changed while the page was frozen
   // and the server cannot tell which ones, so load the page fresh. On
-  // localhost that costs one render, and the new page opens its own stream.
+  // localhost that costs one render, and the new page opens its own connection.
   window.addEventListener("pageshow", function (event) {
     if (event.persisted) {
       location.reload();

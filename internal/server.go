@@ -237,6 +237,9 @@ func (s *Server) newHandler(fsys http.FileSystem) http.Handler {
 		mux.HandleFunc(eventsPath, func(w http.ResponseWriter, r *http.Request) {
 			s.serveEvents(w, r, root, absRoot)
 		})
+		mux.HandleFunc(wsPath, func(w http.ResponseWriter, r *http.Request) {
+			s.serveWS(w, r, root, absRoot)
+		})
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
