@@ -252,6 +252,12 @@ func (s *Server) newHandler(fsys http.FileSystem) http.Handler {
 			return
 		}
 
+		// http.FileServer turns /index.html into a redirect to ./, which is
+		// a folder page here, so serve that file itself.
+		if path.Base(r.URL.Path) == "index.html" && serveFile(w, r, fsys) {
+			return
+		}
+
 		fileServer.ServeHTTP(w, r)
 	})
 
