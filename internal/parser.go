@@ -21,6 +21,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"go.abhg.dev/goldmark/hashtag"
@@ -45,15 +46,30 @@ var supportedMarkdownFeatures = []string{
 
 type Parser struct {
 	disabledFeatures map[string]struct{}
+	hardWraps        bool
 }
 
-func NewParser(disabledFeatures []string) *Parser {
+// ParserOption customizes a Parser.
+type ParserOption func(*Parser)
+
+// WithHardWraps renders a line break inside a paragraph as <br>, as GitHub
+// does for issue and pull request comments. By default it stays a space,
+// as GitHub does for Markdown files.
+func WithHardWraps() ParserOption {
+	return func(p *Parser) { p.hardWraps = true }
+}
+
+func NewParser(disabledFeatures []string, opts ...ParserOption) *Parser {
 	// Normalize feature names once so the rest of the parser can use simple lookups.
 	disabled := make(map[string]struct{}, len(disabledFeatures))
 	for _, feature := range disabledFeatures {
 		disabled[strings.ToLower(feature)] = struct{}{}
 	}
-	return &Parser{disabledFeatures: disabled}
+	p := &Parser{disabledFeatures: disabled}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 func SupportedMarkdownFeatures() []string {
@@ -129,14 +145,16 @@ func (m Parser) MdToHTML(input []byte) ([]byte, error) {
 		extensions = append(extensions, details.New())
 	}
 
+	rendererOptions := []renderer.Option{html.WithUnsafe()}
+	if m.hardWraps {
+		rendererOptions = append(rendererOptions, html.WithHardWraps())
+	}
 	md := goldmark.New(
 		goldmark.WithExtensions(extensions...),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
 		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
-		),
+		goldmark.WithRendererOptions(rendererOptions...),
 	)
 	// Generate heading ids like GitHub does (e.g. keep underscores), so that
 	// anchor links written against GitHub's ids resolve here too.

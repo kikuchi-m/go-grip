@@ -53,7 +53,11 @@ var rootCmd = &cobra.Command{
 			opts = append(opts, internal.WithExcluder(excluder))
 		}
 
-		parser := internal.NewParser(disabledFeatures)
+		var parserOpts []internal.ParserOption
+		if hardWrap, _ := cmd.Flags().GetBool("hard-wrap"); hardWrap {
+			parserOpts = append(parserOpts, internal.WithHardWraps())
+		}
+		parser := internal.NewParser(disabledFeatures, parserOpts...)
 		server := internal.NewServer(host, port, boundingBox, browser, !noReload, parser, logger, opts...)
 		return server.Serve(file)
 	},
@@ -106,6 +110,7 @@ func init() {
 		nil,
 		"Disable optional markdown feature(s): "+strings.Join(internal.SupportedMarkdownFeatures(), ", "),
 	)
+	rootCmd.Flags().Bool("hard-wrap", false, "Render a line break inside a paragraph as <br>, like GitHub comments")
 	rootCmd.Flags().Bool("no-reload", false, "Disable automatic browser reload on file changes")
 	rootCmd.Flags().String("log-level", "info", "Log level on stderr: error, warn, info or debug")
 	rootCmd.Flags().StringArrayP("exclude", "x", nil,

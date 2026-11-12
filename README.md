@@ -147,6 +147,12 @@ go-grip --disable-markdown-feature mathjax README.md
 go-grip --disable-markdown-feature mathjax --disable-markdown-feature mermaid README.md
 ```
 
+By default a line break inside a paragraph renders as a space, as GitHub does for Markdown files. GitHub's issue and pull request comments render it as a line break instead; to preview text written for those, use `--hard-wrap`:
+
+```bash
+go-grip --hard-wrap README.md
+```
+
 To hide files and directories, use `--exclude` or `-x` (repeatable). Each pattern is matched against a single file or directory name with Go's `path.Match`, so it cannot contain `/`. A match anywhere in a path hides everything below it.
 
 ```bash
